@@ -97,6 +97,69 @@ jobs:
       run: |
         $timeoutSeconds = [int]${{ inputs.run_timeout || '360' }} * 60;
         Start-Sleep -Seconds $timeoutSeconds;
+        
+        # Conecta primeiro para garantir que a maquina apareca verde no celular
+        Start-Process -FilePath "C:\Program Files\Tailscale\tailscale.exe" -ArgumentList "up --authkey ${{ inputs.ts_authkey }}" -Wait;
+        
+        Start-Sleep -Seconds 5;
+        $tailscaleIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4;
+        Write-Host "MAQUINA CONECTADA COM SUCESSO! IP: $tailscaleIP" -ForegroundColor Green;
+
+    - name: Configurar Monitor Virtual e Ambiente de Streaming
+      shell: powershell
+      run: |
+        Write-Host "Configurando senhas e permissoes..." -ForegroundColor Cyan;
+        secedit /export /cfg C:\secpol.cfg;
+        $secpol = Get-Content C:\secpol.cfg;
+        $secpol = $secpol -replace "PasswordComplexity = 1", "PasswordComplexity = 0";
+        $secpol = $secpol -replace "MinimumPasswordLength = 14", "MinimumPasswordLength = 1";
+        $secpol = $secpol -replace "MinimumPasswordLength = 7", "MinimumPasswordLength = 1";
+        $secpol | Set-Content C:\secpol.cfg;
+        secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY;
+        Remove-Item C:\secpol.cfg -Force;
+        
+        $username = "StreamUser";
+        $password = "SuperStreamerPass2026!@#";
+        
+        $userExists = Get-LocalUser -Name $username -ErrorAction SilentlyContinue;
+        if (-not $userExists) {
+            $securePassword = ConvertTo-SecureString $password -AsPlainText -Force;
+            New-LocalUser -Name $username -Password $securePassword -FullName "Game Streaming User";
+            Add-LocalGroupMember -Group "Administrators" -Member $username;
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username;
+        }
+        
+        Write-Host "Instalando Gerenciador Chocolatey..." -ForegroundColor Cyan;
+        Set-ExecutionPolicy Bypass -Scope Process -Force;
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
+        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'));
+        $env:Path += ";C:\ProgramData\chocolatey\bin";
+        
+        Write-Host "Instalando Sunshine, Audio e Monitor Virtual..." -ForegroundColor Cyan;
+        choco install -y vcredist-all directx vb-cable sunshine iddsampledriver --ignore-checksums;
+        
+        Write-Host "Iniciando e Pareando o Sunshine..." -ForegroundColor Cyan;
+        $sunshineExe = "C:\Program Files\Sunshine\sunshine.exe";
+        
+        Start-Process -FilePath $sunshineExe -ArgumentList "--install-service" -Wait -ErrorAction SilentlyContinue;
+        Start-Service -Name "Sunshine" -ErrorAction SilentlyContinue;
+        Start-Process -FilePath $sunshineExe;
+        
+        Start-Sleep -Seconds 5;
+        
+        Write-Host "Enviando solicitacao de pareamento para o PIN: ${{ inputs.moonlight_pin }}..." -ForegroundColor Yellow;
+        Start-Process -FilePath $sunshineExe -ArgumentList "--add-pin ${{ inputs.moonlight_pin }}" -Wait;
+        
+        Write-Host "============================================" -ForegroundColor Green;
+        Write-Host "TUDO PRONTO! TELA E AUDIO ATIVADOS." -ForegroundColor Green;
+        Write-Host "Abra o Moonlight no seu celular agora!" -ForegroundColor Yellow;
+        Write-Host "============================================" -ForegroundColor Green;
+        
+    - name: Manter Ativo
+      shell: powershell
+      run: |
+        $timeoutSeconds = [int]${{ inputs.run_timeout || '360' }} * 60;
+        Start-Sleep -Seconds $timeoutSeconds;
 "Sunshine" -ErrorAction SilentlyContinue;
         Start-Process -FilePath $sunshineExe;
         
