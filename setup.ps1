@@ -30,10 +30,49 @@ Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue;
 Set-Service -Name "Audiosrv" -StartupType Automatic -ErrorAction SilentlyContinue;
 Start-Service -Name "Audiosrv" -ErrorAction SilentlyContinue;
 
-Write-Host "Instalando dependencias basicas..." -ForegroundColor Cyan;
+Write-Host "Instalando dependencias basicas e o Sunshine..." -ForegroundColor Cyan;
 Set-ExecutionPolicy Bypass -Scope Process -Force;
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
 Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'));
+$env:Path += ";C:\ProgramData\chocolatey\bin";
+
+# Adicionado o 'sunshine' direto no choco. Ele instala sem quebrar a conexão!
+choco install -y vcredist-all directx sunshine --ignore-checksums;
+
+Write-Host "Baixando Drivers de Audio para o Desktop..." -ForegroundColor Cyan;
+$vbCableZip = "C:\Users\Public\Desktop\Instalar_VB_Cable.zip";
+Invoke-WebRequest -Uri "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip" -OutFile $vbCableZip -ErrorAction SilentlyContinue;
+
+Write-Host "Configurando Atalhos do Sunshine..." -ForegroundColor Cyan;
+# Criando atalho funcional apontando para a pasta oficial do Chocolatey/Sunshine
+$sunshineShortcut = "C:\Users\Public\Desktop\Iniciar_Sunshine.lnk";
+$WScriptShell = New-Object -ComObject WScript.Shell;
+$Shortcut = $WScriptShell.CreateShortcut($sunshineShortcut);
+$Shortcut.TargetPath = "C:\Program Files\Sunshine\bin\sunshine.exe";
+$Shortcut.WorkingDirectory = "C:\Program Files\Sunshine\bin";
+$Shortcut.Save();
+
+# Inicia o serviço do Sunshine
+Start-Process -FilePath "C:\Program Files\Sunshine\bin\sunshine.exe" -WorkingDirectory "C:\Program Files\Sunshine\bin";
+
+Write-Host "Instalando Tailscale..." -ForegroundColor Cyan;
+$tailscaleInstaller = "C:\Temp\Tailscale.msi";
+New-Item -ItemType Directory -Force -Path "C:\Temp" | Out-Null;
+Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $tailscaleInstaller;
+Start-Process msiexec.exe -ArgumentList "/i `"$tailscaleInstaller`" /quiet" -Wait;
+
+# Conectando usando a chave
+Start-Process -FilePath "C:\Program Files\Tailscale\tailscale.exe" -ArgumentList "up --authkey $env:TS_AUTHKEY" -Wait;
+
+Start-Sleep -Seconds 10;
+$tailscaleIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4;
+
+Write-Host "============================================" -ForegroundColor Green;
+Write-Host "VM PRONTA!" -ForegroundColor Yellow;
+Write-Host "IP Tailscale: $tailscaleIP" -ForegroundColor White;
+Write-Host "Usuario: $username" -ForegroundColor White;
+Write-Host "Senha: $password" -ForegroundColor White;
+Write-Host "============================================" -ForegroundColor Green;
 $env:Path += ";C:\ProgramData\chocolatey\bin";
 
 choco install -y vcredist-all directx --ignore-checksums;
