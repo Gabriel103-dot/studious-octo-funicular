@@ -1,14 +1,13 @@
 name: Windows 11 Game Streaming VM
-
 on:
   workflow_dispatch:
     inputs:
       ts_authkey:
-        description: 'Tailscale Auth Key'
+        description: 'Tailscale Auth Key (obtenha em https://login.tailscale.com/admin/settings/keys)'
         required: true
         type: string
       run_timeout:
-        description: 'Tempo de execucao em minutos'
+        description: 'Tempo de execucao em minutos (padrao: 360 = 6 horas)'
         required: false
         default: '360'
         type: string
@@ -16,24 +15,107 @@ on:
 jobs:
   deploy-windows-streaming-vm:
     runs-on: windows-latest
-    timeout-minutes: 360
-
+    timeout-minutes: ${{ fromJSON(inputs.run_timeout || '360') }}
+    
     steps:
-    - name: Baixar o codigo do repositorio
-      uses: actions/checkout@v4
-
-    - name: Executar configuracao do ambiente Windows
+    - name: Configurar ambiente Windows 11 para streaming
       shell: powershell
-      env:
-        TS_AUTHKEY: ${{ github.event.inputs.ts_authkey }}
       run: |
-        ./setup.ps1
-
-    - name: Manter a maquina ativa
+        # ============================================
+        # CONFIGURACAO BASICA DO SISTEMA E SEGURANCA
+        # ============================================
+        
+        Write-Host "Configurando politica de senhas..." -ForegroundColor Cyan;
+        secedit /export /cfg C:\secpol.cfg;
+        $secpol = Get-Content C:\secpol.cfg;
+        $secpol = $secpol -replace "PasswordComplexity = 1", "PasswordComplexity = 0";
+        $secpol = $secpol -replace "MinimumPasswordLength = 14", "MinimumPasswordLength = 1";
+        $secpol = $secpol -replace "MinimumPasswordLength = 7", "MinimumPasswordLength = 1";
+        $secpol | Set-Content C:\secpol.cfg;
+        secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY;
+        Remove-Item C:\secpol.cfg -Force;
+        
+        $username = "StreamUser";
+        $password = "SuperStreamerPass2026!@#";
+        
+        Write-Host "Criando usuario $username para RDP..." -ForegroundColor Cyan;
+        $userExists = Get-LocalUser -Name $username -ErrorAction SilentlyContinue;
+        if (-not $userExists) {
+            $securePassword = ConvertTo-SecureString $password -AsPlainText -Force;
+            New-LocalUser -Name $username -Password $securePassword -FullName "Game Streaming User";
+            Add-LocalGroupMember -Group "Administrators" -Member $username;
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username;
+        }
+        
+        Write-Host "Desativando Firewall do Windows..." -ForegroundColor Cyan;
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False;
+        
+        Write-Host "Otimizando Windows Defender..." -ForegroundColor Cyan;
+        Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue;
+        
+        Write-Host "Aplicando otimizacoes de performance..." -ForegroundColor Cyan;
+        powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c;
+        
+        Write-Host "Instalando gerenciador de pacotes..." -ForegroundColor Cyan;
+        Set-ExecutionPolicy Bypass -Scope Process -Force;
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
+        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'));
+        $env:Path += ";C:\ProgramData\chocolatey\bin";
+        
+        Write-Host "Instalando Runtimes, Audio e Sunshine..." -ForegroundColor Cyan;
+        # Instalando tudo via Chocolatey de forma limpa e correta
+        choco install -y vcredist-all directx vb-cable sunshine --ignore-checksums;
+        
+        Write-Host "Configurando o Sunshine..." -ForegroundColor Cyan;
+        $sunshinePath = "C:\Program Files\Sunshine";
+        
+        $sunshineConfig = '{
+          "apps": [
+            {
+              "name": "Desktop",
+              "output": "",
+              "cmd": "C:\\Windows\\System32\\mstsc.exe",
+              "prep-cmd": []
+            }
+          ],
+          "port": 47989,
+          "video": {
+            "fps": 60,
+            "bitrate": 20000
+          }
+        }';
+        
+        New-Item -ItemType Directory -Force -Path "$env:PROGRAMDATA\Sunshine\config" | Out-Null;
+        $sunshineConfig | Out-File -FilePath "$env:PROGRAMDATA\Sunshine\config\sunshine.json" -Encoding ASCII;
+        
+        Write-Host "Iniciando servico do Sunshine..." -ForegroundColor Cyan;
+        # Executa o Sunshine liberando conexoes de fora
+        Start-Process -FilePath "$sunshinePath\sunshine.exe" -ArgumentList "--install-service" -Wait -ErrorAction SilentlyContinue;
+        Start-Service -Name "Sunshine" -ErrorAction SilentlyContinue;
+        Start-Process -FilePath "$sunshinePath\sunshine.exe" -WorkingDirectory $sunshinePath;
+        
+        Write-Host "Instalando Tailscale..." -ForegroundColor Cyan;
+        $tailscaleInstaller = "C:\Temp\Tailscale.msi";
+        New-Item -ItemType Directory -Force -Path "C:\Temp" | Out-Null;
+        Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $tailscaleInstaller;
+        Start-Process msiexec.exe -ArgumentList "/i `"$tailscaleInstaller`" /quiet" -Wait;
+        
+        Start-Process -FilePath "C:\Program Files\Tailscale\tailscale.exe" -ArgumentList "up --authkey ${{ inputs.ts_authkey }}" -Wait;
+        
+        Start-Sleep -Seconds 10;
+        $tailscaleIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4;
+        
+        Write-Host "============================================" -ForegroundColor Green;
+        Write-Host "CONFIGURACAO COMPLETA!" -ForegroundColor Green;
+        Write-Host "IP DO TAILSCALE: $tailscaleIP" -ForegroundColor White;
+        Write-Host "============================================" -ForegroundColor Green;
+        
+    - name: Status Final e Keep-Alive
       shell: powershell
-      env:
-        RUN_TIMEOUT: ${{ github.event.inputs.run_timeout }}
       run: |
+        Write-Host "Mantendo maquina ativa..." -ForegroundColor Cyan;
+        $timeoutSeconds = [int]${{ inputs.run_timeout || '360' }} * 60;
+        Start-Sleep -Seconds $timeoutSeconds;
         $minutes = $env:RUN_TIMEOUT
         if ([string]::IsNullOrWhiteSpace($minutes)) { $minutes = "360" }
         $seconds = [int]$minutes * 60
