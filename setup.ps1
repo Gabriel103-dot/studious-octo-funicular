@@ -43,6 +43,53 @@ $vbCableZip = "C:\Users\Public\Desktop\Instalar_VB_Cable.zip";
 Invoke-WebRequest -Uri "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip" -OutFile $vbCableZip -ErrorAction SilentlyContinue;
 
 Write-Host "Instalando Sunshine..." -ForegroundColor Cyan;
+# URL corrigida para o instalador executavel oficial estável do Sunshine
+$sunshineUrl = "https://github.com/LizardByte/Sunshine/releases/download/v2025.1220.194215/sunshine-windows-x64-installer.exe";
+$sunshinePath = "C:\Sunshine";
+$sunshineInstaller = "C:\Temp\sunshine_installer.exe";
+New-Item -ItemType Directory -Force -Path "C:\Temp" | Out-Null;
+
+# Baixa e instala de forma silenciosa
+Invoke-WebRequest -Uri $sunshineUrl -OutFile $sunshineInstaller;
+Start-Process -FilePath $sunshineInstaller -ArgumentList "/S" -Wait;
+
+# Criando atalho funcional a partir da instalacao padrao do Sunshine
+$sunshineShortcut = "C:\Users\Public\Desktop\Iniciar_Sunshine.lnk";
+$WScriptShell = New-Object -ComObject WScript.Shell;
+$Shortcut = $WScriptShell.CreateShortcut($sunshineShortcut);
+$Shortcut.TargetPath = "C:\Program Files\Sunshine\sunshine.exe";
+$Shortcut.WorkingDirectory = "C:\Program Files\Sunshine";
+$Shortcut.Save();
+
+# Inicia o Sunshine em background
+Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WorkingDirectory "C:\Program Files\Sunshine";
+
+Write-Host "Instalando Tailscale..." -ForegroundColor Cyan;
+$tailscaleInstaller = "C:\Temp\Tailscale.msi";
+Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $tailscaleInstaller;
+Start-Process msiexec.exe -ArgumentList "/i `"$tailscaleInstaller`" /quiet" -Wait;
+
+# Conectando usando a variável de ambiente segura
+Start-Process -FilePath "C:\Program Files\Tailscale\tailscale.exe" -ArgumentList "up --authkey $env:TS_AUTHKEY" -Wait;
+
+Start-Sleep -Seconds 10;
+$tailscaleIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4;
+
+Write-Host "============================================" -ForegroundColor Green;
+Write-Host "VM PRONTA!" -ForegroundColor Yellow;
+Write-Host "IP Tailscale: $tailscaleIP" -ForegroundColor White;
+Write-Host "Usuario: $username" -ForegroundColor White;
+Write-Host "Senha: $password" -ForegroundColor White;
+Write-Host "============================================" -ForegroundColor Green;
+$env:Path += ";C:\ProgramData\chocolatey\bin";
+
+choco install -y vcredist-all directx --ignore-checksums;
+
+Write-Host "Baixando Drivers de Audio para o Desktop..." -ForegroundColor Cyan;
+$vbCableZip = "C:\Users\Public\Desktop\Instalar_VB_Cable.zip";
+Invoke-WebRequest -Uri "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip" -OutFile $vbCableZip -ErrorAction SilentlyContinue;
+
+Write-Host "Instalando Sunshine..." -ForegroundColor Cyan;
 $sunshineUrl = "https://github.com/LizardByte/Sunshine/releases/latest/download/Sunshine-Windows.zip";
 $sunshinePath = "C:\Sunshine";
 $sunshineZip = "C:\Temp\Sunshine.zip";
