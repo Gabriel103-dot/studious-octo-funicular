@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       moonlight_pin:
-        description: 'Digite o PIN de 4 digitos que apareceu no Moonlight do celular'
+        description: 'Digite o PIN de 4 digitos do Moonlight do celular'
         required: true
         type: string
       run_timeout:
@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 360
     
     steps:
-    - name: Configurar ambiente Windows com Pareamento Automatico
+    - name: Configurar Monitor Virtual e Ambiente de Streaming
       shell: powershell
       run: |
         Write-Host "Configurando senhas e permissões..." -ForegroundColor Cyan;
@@ -34,6 +34,66 @@ jobs:
         $secpol | Set-Content C:\secpol.cfg;
         secedit /configure /db C:\Windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY;
         Remove-Item C:\secpol.cfg -Force;
+        
+        $username = "StreamUser";
+        $password = "SuperStreamerPass2026!@#";
+        
+        $userExists = Get-LocalUser -Name $username -ErrorAction SilentlyContinue;
+        if (-not $userExists) {
+            $securePassword = ConvertTo-SecureString $password -AsPlainText -Force;
+            New-LocalUser -Name $username -Password $securePassword -FullName "Game Streaming User";
+            Add-LocalGroupMember -Group "Administrators" -Member $username;
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username;
+        }
+        
+        Write-Host "Desativando Firewalls..." -ForegroundColor Cyan;
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False;
+        Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue;
+        
+        Write-Host "Instalando Gerenciador Chocolatey..." -ForegroundColor Cyan;
+        Set-ExecutionPolicy Bypass -Scope Process -Force;
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
+        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'));
+        $env:Path += ";C:\ProgramData\chocolatey\bin";
+        
+        Write-Host "Instalando Sunshine, Audio e Monitor Virtual..." -ForegroundColor Cyan;
+        # Instalando o 'iddsamdriver' para criar a tela virtual indispensavel para o Sunshine
+        choco install -y vcredist-all directx vb-cable sunshine iddsampledriver --ignore-checksums;
+        
+        Write-Host "Iniciando e Pareando o Sunshine..." -ForegroundColor Cyan;
+        $sunshineExe = "C:\Program Files\Sunshine\sunshine.exe";
+        
+        Start-Process -FilePath $sunshineExe -ArgumentList "--install-service" -Wait -ErrorAction SilentlyContinue;
+        Start-Service -Name "Sunshine" -ErrorAction SilentlyContinue;
+        Start-Process -FilePath $sunshineExe;
+        
+        Start-Sleep -Seconds 5;
+        
+        Write-Host "Enviando solicitacao de pareamento para o PIN: ${{ inputs.moonlight_pin }}..." -ForegroundColor Yellow;
+        Start-Process -FilePath $sunshineExe -ArgumentList "--add-pin ${{ inputs.moonlight_pin }}" -Wait;
+        
+        Write-Host "Conectando ao Tailscale..." -ForegroundColor Cyan;
+        $tailscaleInstaller = "C:\Temp\Tailscale.msi";
+        New-Item -ItemType Directory -Force -Path "C:\Temp" | Out-Null;
+        Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $tailscaleInstaller;
+        Start-Process msiexec.exe -ArgumentList "/i `"$tailscaleInstaller`" /quiet" -Wait;
+        
+        Start-Process -FilePath "C:\Program Files\Tailscale\tailscale.exe" -ArgumentList "up --authkey ${{ inputs.ts_authkey }}" -Wait;
+        
+        Start-Sleep -Seconds 5;
+        $tailscaleIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4;
+        
+        Write-Host "============================================" -ForegroundColor Green;
+        Write-Host "PRONTO! MONITOR VIRTUAL ATIVADO." -ForegroundColor Green;
+        Write-Host "IP da Máquina: $tailscaleIP" -ForegroundColor White;
+        Write-Host "Abra o Moonlight no seu celular agora!" -ForegroundColor Yellow;
+        Write-Host "============================================" -ForegroundColor Green;
+        
+    - name: Manter Ativo
+      shell: powershell
+      run: |
+        $timeoutSeconds = [int]${{ inputs.run_timeout || '360' }} * 60;
+        Start-Sleep -Seconds $timeoutSeconds;
         
         $username = "StreamUser";
         $password = "SuperStreamerPass2026!@#";
