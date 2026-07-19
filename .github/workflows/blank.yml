@@ -1,0 +1,41 @@
+name: Windows 11 Game Streaming VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      ts_authkey:
+        description: 'Tailscale Auth Key'
+        required: true
+        type: string
+      run_timeout:
+        description: 'Tempo de execucao em minutos'
+        required: false
+        default: '360'
+        type: string
+
+jobs:
+  deploy-windows-streaming-vm:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+    - name: Baixar o codigo do repositorio
+      uses: actions/checkout@v4
+
+    - name: Executar configuracao do ambiente Windows
+      shell: powershell
+      env:
+        TS_AUTHKEY: ${{ github.event.inputs.ts_authkey }}
+      run: |
+        ./setup.ps1
+
+    - name: Manter a maquina ativa
+      shell: powershell
+      env:
+        RUN_TIMEOUT: ${{ github.event.inputs.run_timeout }}
+      run: |
+        $minutes = $env:RUN_TIMEOUT
+        if ([string]::IsNullOrWhiteSpace($minutes)) { $minutes = "360" }
+        $seconds = [int]$minutes * 60
+        Write-Host "A VM ficara ativa por $minutes minutos. Não feche esta aba." -ForegroundColor Blue
+        Start-Sleep -Seconds $seconds
